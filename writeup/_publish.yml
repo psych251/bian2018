@@ -1,0 +1,4 @@
+- source: replication-report.qmd
+  posit-connect-cloud:
+    - id: 01a109b9-4af0-c6e4-e0f7-57db747646f6
+      url: https://connect.posit.cloud/miyer13/content/01a109b9-4af0-c6e4-e0f7-57db747646f6

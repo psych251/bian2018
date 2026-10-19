@@ -46,30 +46,34 @@ exclusion rule, and the key comparison.
 #| include: false
 library(tidyverse)
 library(jsonlite)
-
-# Must match EXPERIMENT.id in experiment.js, and the --experiment you passed to the export.
+library(brms)
+ 
+# Must match the folder name inside data/ (data/replication/).
 # Phase 2 runs under its own id, so its data never mix with Phase 1's.
-experiment_id        <- "framing-demo"
-experiment_id_phase2 <- "framing-demo-phase2"
+experiment_id        <- "replication"
+experiment_id_phase2 <- "replication-phase2"
 ```
 
 ```{r}
 #| label: original-study
 #| include: false
-# The original study's numbers, entered once and used by the power analysis, the Key
-# statistics table, and the side-by-side figures. Replace these with your original study's
-# values, and say in a comment exactly where in the paper each one comes from.
-#
-# Tversky & Kahneman (1981), Problem 1 (gain frame, N = 152): 72% chose the certain program,
-# 28% the risky one. Problem 2 (loss frame, N = 155): 22% certain, 78% risky. The paper
-# reports percentages, so the counts below are reconstructed from them.
-original <- tibble(
-  condition = c("gain", "loss"),
-  n         = c(152, 155),
-  risky     = round(c(0.28 * 152, 0.78 * 155))
-)
-original_p_gain <- original$risky[original$condition == "gain"] / original$n[original$condition == "gain"]
-original_p_loss <- original$risky[original$condition == "loss"] / original$n[original$condition == "loss"]
+# Bian, Leslie & Cimpian (2018), Experiment 1. Open data: Study1.csv from the authors'
+# repository (https://osf.io/wnesy/). One row per referral: 691 referrals from 347 participants.
+# The paper's 52.5% / 40.5% are model-based marginal means adjusted for participant gender and
+# stereotype score; the raw proportions computed here are slightly different.
+# Paper's key estimate: condition b = -0.483, 95% CrI [-0.807, -0.165].
+orig_raw <- read_csv(file.path("..", "data", "original", "Study1.csv"), show_col_types = FALSE)
+ 
+original <- orig_raw |>
+  mutate(condition = if_else(brilliance == 1, "brilliance", "effort")) |>
+  group_by(condition) |>
+  summarise(n = n(), women = sum(nominated_woman),
+            participants = n_distinct(subj), .groups = "drop") |>
+  mutate(condition = factor(condition, levels = c("effort", "brilliance")))
+ 
+original_p_effort     <- original$women[original$condition == "effort"] / original$n[original$condition == "effort"]
+original_p_brilliance <- original$women[original$condition == "brilliance"] / original$n[original$condition == "brilliance"]
+original_b <- c(est = -0.483, low = -0.807, high = -0.165)
 ```
 
 ::: {.callout-note appearance="simple" icon=false}
@@ -77,32 +81,17 @@ original_p_loss <- original$risky[original$condition == "loss"] / original$n[ori
 
 - **Original paper:** Bian, L., Leslie, S.-J., & Cimpian, A. (2018). Evidence of bias against girls and women in contexts that emphasize intellectual ability. *American Psychologist, 73*(9), 1139–1153. https://doi.org/10.1037/amp0000427
 - **Preregistration:** [OSF registration](https://osf.io/XXXXX) *(registered YYYY-MM-DD, before final data collection)*
-- **Live experiment:** <https://psych251.github.io/bian2018/> (take the study exactly as participants did)
+- **Live experiment:** <https://stanforduniversity.qualtrics.com/jfe/form/SV_b1xkilAyjiKAVPE> (take the study exactly as participants did)
 - **Repository:** <https://github.com/psych251/bian2018.git> (experiment code, data, and this report)
 :::
 
 # AI use statement
 I used AI to help debug errors I was getting on my Terminal when I was cloning the Github repository to my local device folders. 
 
-::: {.callout-tip icon=false}
-## Guidance
-
-This statement comes first so a reader knows how the work was produced before reading it. Keep
-it current from the start of the project rather than reconstructing it at the end.
-
-**Course policy: you write all of the text in this report yourself.** AI tools may help with
-code, and may comment on drafts you have written, but they may not write, rewrite or paraphrase
-any of the report's text. That includes "polishing" a paragraph.
-
-List every AI tool you used on this project, what you used it for, and how you checked what it
-produced. Include coding assistants (for example Claude Code, Codex, Copilot) and chat
-assistants. Name the model and version where you know it. "How you checked" is the important
-column: say what you verified yourself, not that the output "looked right". If you used no AI
-tools, replace the table with a sentence saying so.
-:::
-
 | Tool and model | What it was used for | How you checked the output |
-|Claude-Opus-5-5|Debugging clone code from repo|I reviewed the output and typed the code in on my own into the terminal|
+|Claude-Opus-5-5|Debugging clone code from repo|I reviewed the output and typed the code in on my own into the terminal| 
+|Claude-Sonnet-5-5|Wrote and adapted code based on syntax provided from original study|I reviewed the output and handcounts from exclusions|
+
 | *e.g., Claude Code (Claude Opus 5)* | *Implemented the experiment from the original Methods section* | *Ran the automated tests; took the study myself; compared every screen with the original materials* |
 | *e.g., Claude Code (Claude Opus 5)* | *Drafted the analysis code* | *Checked the exclusion counts by hand; confirmed the key test matches the preregistration* |
 | *e.g., ChatGPT* | *Comments on my draft of the Introduction (no text generated)* | *Decided which comments to act on and made every change myself; checked any factual claim against the source* |
@@ -128,54 +117,92 @@ adapt its code and say so in the caption.
 #| label: analysis-functions
 #| code-summary: "Show the analysis code (shared by Phase 1 and Phase 2)"
 
-# Load one phase's exported data and apply the exclusion rule. Returns NULL if that phase
-# has not been exported yet, which is how every section below knows to skip itself.
-read_phase <- function(id) {
-  dir <- file.path("..", "data", "raw", id)
-  if (!all(file.exists(file.path(dir, c("participants.csv", "trials.csv"))))) return(NULL)
-  participants <- read_csv(file.path(dir, "participants.csv"), show_col_types = FALSE)
-  trials       <- read_csv(file.path(dir, "trials.csv"), show_col_types = FALSE)
-  errors_path  <- file.path(dir, "errors.csv")
-  errors <- if (file.exists(errors_path)) read_csv(errors_path, show_col_types = FALSE) else tibble()
+brilliance_items <- c("High IQ", "Superior reasoning skills", "Natural intelligence",
+                      "Knack for big, bold ideas")
+effort_items     <- c("Highly motivated", "Superior commitment", "Sustained dedication",
+                      "Continual improvement")
 
+# Counts how many items from a set appear in the selection text. Matches each item rather
+# than splitting on commas, because "Knack for big, bold ideas" contains a comma.
+count_items <- function(sel, items) {
+  map_int(sel, function(s) if (is.na(s)) 0L else sum(str_detect(s, fixed(items))))
+}
+
+# Load one phase's data straight from the raw Qualtrics export (data/<id>/<id>_raw.csv) and
+# apply the exclusion rule. Returns NULL if that file is not there yet, which is how every
+# section below skips itself.
+read_phase <- function(id) {
+  raw_path <- file.path("..", "data", id, paste0(id, "_raw.csv"))
+  if (!file.exists(raw_path)) return(NULL)
+
+  raw <- read_csv(raw_path, col_types = cols(.default = "c"), show_col_types = FALSE) |>
+    slice(-(1:2)) |>                    # Qualtrics adds a question-text row and an ImportId row
+    filter(Status == "IP Address")      # drops "Survey Preview" responses
+
+  recode_cond <- function(x) if_else(x == "control", "effort", x)
+
+  # One row per person
+  participants <- raw |>
+    transmute(
+      participant_id = ResponseId,
+      completed      = Finished == "True",
+      condition      = recode_cond(condition),
+      gender, ethnicity, residence, education,
+      age            = suppressWarnings(as.numeric(age)),
+      memory_check,
+      answered_randomly = str_detect(random, "^Yes") %in% TRUE,
+      n_referrals    = (!is.na(ref_gen_1)) + (!is.na(ref_gen_2)),
+      same_referral  = str_squish(str_to_lower(ref_name_1)) == str_squish(str_to_lower(ref_name_2))
+    )
+
+  # One row per referral (each person made two)
+  trials <- raw |>
+    transmute(participant_id = ResponseId, condition = recode_cond(condition),
+              ref_gen_1, ref_gen_2) |>
+    pivot_longer(c(ref_gen_1, ref_gen_2), names_to = "trial", values_to = "referee_gender") |>
+    transmute(participant_id, condition,
+              trial = if_else(trial == "ref_gen_1", 1L, 2L),
+              referee_gender,
+              nominated_woman = case_when(referee_gender == "Female" ~ 1L,
+                                          referee_gender == "Male"   ~ 0L,
+                                          TRUE ~ NA_integer_))
+
+  errors   <- tibble()
   complete <- participants |> filter(completed)
 
-  # Exclusion rule: replace with the rule you preregistered. Here: at least 6 of 8
-  # lexical-decision trials correct, and at least one speeded response at all (a session in
-  # which every speeded trial timed out is what a device without a keyboard produces).
-  ld <- trials |>
-    filter(task == "lexical_decision") |>
-    group_by(participant_id) |>
-    summarise(ld_acc           = mean(as.logical(correct), na.rm = TRUE),
-              ld_all_timed_out = all(as.logical(timed_out)),
-              .groups = "drop")
-  checked <- complete |> left_join(ld, by = "participant_id")
-  keep <- checked |> filter(!is.na(ld_acc), !ld_all_timed_out, ld_acc >= 0.75)
+  # Exclusions: memory check (a) none of own-condition items, (b) any other-condition item;
+  # outside the US; under 18; reported answering randomly; no referrals; same referral twice.
+  checked <- complete |>
+    mutate(n_brilliance = count_items(memory_check, brilliance_items),
+           n_effort     = count_items(memory_check, effort_items),
+           n_own   = if_else(condition == "brilliance", n_brilliance, n_effort),
+           n_other = if_else(condition == "brilliance", n_effort, n_brilliance),
+           passed_memory = n_own >= 1 & n_other == 0)
+  keep <- checked |>
+    filter(passed_memory, residence == "United States", age >= 18,
+           !answered_randomly, n_referrals >= 1, !(same_referral %in% TRUE))
 
   list(participants = participants, trials = trials, errors = errors,
        complete = complete, keep = keep,
-       n_no_response = sum(checked$ld_all_timed_out %in% TRUE))
+       n_failed_memory = sum(!checked$passed_memory))
 }
 
-# The key comparison's raw counts: how many analysed participants chose the risky program
-# in each frame.
-risky_counts <- function(d) {
+# Women referred and total referrals per condition, analysed participants only.
+women_counts <- function(d) {
   d$trials |>
-    filter(task == "framing", participant_id %in% d$keep$participant_id) |>
+    filter(participant_id %in% d$keep$participant_id, !is.na(nominated_woman)) |>
     group_by(condition) |>
-    summarise(risky = sum(choice == "risky"), n = n(), .groups = "drop")
+    summarise(women = sum(nominated_woman), n = n(), .groups = "drop")
 }
 
-# The key statistic: difference in the proportion choosing the risky program (loss minus
-# gain) with a 95% CI, and the uncorrected chi-square, which is the same test. NULL until
-# both frames have at least one analysed participant.
+# Rough stand-in (brilliance minus effort, % women referred) that ignores clustering of
+# referrals within participants. The confirmatory model is the real key test.
 diff_ci <- function(counts) {
-  loss <- counts[counts$condition == "loss", ]
-  gain <- counts[counts$condition == "gain", ]
-  if (nrow(loss) == 0 || nrow(gain) == 0) return(NULL)
-  pt <- prop.test(c(loss$risky, gain$risky), c(loss$n, gain$n), correct = FALSE)
-  tibble(N = loss$n + gain$n,
-         estimate = unname(pt$estimate[1] - pt$estimate[2]),
+  b <- counts[counts$condition == "brilliance", ]
+  e <- counts[counts$condition == "effort", ]
+  if (nrow(b) == 0 || nrow(e) == 0) return(NULL)
+  pt <- prop.test(c(b$women, e$women), c(b$n, e$n), correct = FALSE)
+  tibble(N = b$n + e$n, estimate = unname(pt$estimate[1] - pt$estimate[2]),
          ci_low = pt$conf.int[1], ci_high = pt$conf.int[2],
          statistic = unname(pt$statistic), p = pt$p.value)
 }
@@ -188,9 +215,12 @@ prop_ci <- function(x, n) {
 comparison_plot <- function(...) {
   studies <- list(...)
   studies <- studies[!map_lgl(studies, ~ is.null(.x) || nrow(.x) == 0)]
-  df <- imap_dfr(studies, ~ mutate(.x, Study = .y)) |>
-    rowwise() |> mutate(prop_ci(risky, n)) |> ungroup() |>
-    mutate(Study = factor(Study, levels = names(studies)), label = sprintf("n = %d", n))
+  df <- imap_dfr(studies, ~ mutate(.x, Study = .y, condition = as.character(condition))) |>
+    select(Study, condition, women, n) |>
+    rowwise() |> mutate(prop_ci(women, n)) |> ungroup() |>
+    mutate(Study = factor(Study, levels = names(studies)),
+           condition = factor(condition, levels = c("effort", "brilliance")),
+           label = sprintf("n = %d", n))
   fills <- setNames(c("grey55", "#1E6E76", "#B8792A")[seq_along(studies)], names(studies))
   dodge <- position_dodge(width = 0.8)
   ggplot(df, aes(x = condition, y = p, fill = Study)) +
@@ -199,9 +229,8 @@ comparison_plot <- function(...) {
     geom_text(aes(y = 0.02, label = label), position = dodge, vjust = 0, size = 3, colour = "white") +
     scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
     scale_fill_manual(values = fills) +
-    labs(x = "Frame", y = "Chose the risky program", fill = NULL) +
-    theme_minimal(base_size = 12) +
-    theme(legend.position = "top")
+    labs(x = "Job description", y = "Referrals who were women", fill = NULL) +
+    theme_minimal(base_size = 12) + theme(legend.position = "top")
 }
 
 phase1 <- read_phase(experiment_id)
@@ -215,22 +244,22 @@ have_phase2 <- !is.null(phase2)
 #| echo: false
 fmt_row <- function(study, r) {
   if (is.null(r)) {
-    return(tibble(Study = study, N = "", `Effect (loss − gain)` = "not yet collected",
+    return(tibble(Study = study, N = "", `Effect (brilliance − effort)` = "not yet collected",
                   `95% CI` = "", `χ²(1)` = "", p = ""))
   }
   tibble(Study = study, N = as.character(r$N),
-         `Effect (loss − gain)` = sprintf("%.0f points", 100 * r$estimate),
+         `Effect (brilliance − effort)` = sprintf("%.0f points", 100 * r$estimate),
          `95% CI` = sprintf("[%.0f, %.0f]", 100 * r$ci_low, 100 * r$ci_high),
          `χ²(1)` = sprintf("%.2f", r$statistic),
          p = format.pval(r$p, digits = 2, eps = 0.001))
 }
 bind_rows(
   fmt_row("Original", diff_ci(original)),
-  fmt_row("Phase 1: replication", if (have_data) diff_ci(risky_counts(phase1))),
-  fmt_row("Phase 2: extension", if (have_phase2) diff_ci(risky_counts(phase2)))
+  fmt_row("Phase 1: replication", if (have_data) diff_ci(women_counts(phase1))),
+  fmt_row("Phase 2: extension", if (have_phase2) diff_ci(women_counts(phase2)))
 ) |>
   knitr::kable(align = "lrlllr",
-               caption = "Key comparison: difference in the percentage of analysed participants choosing the risky program, loss frame minus gain frame.")
+               caption = "Key comparison: difference in the percentage of referrals who were women, brilliance minus effort. N is referrals. This is a stand-in test that ignores clustering; the multilevel model below is the key test.")
 ```
 
 # Phase 1: Replication
@@ -251,114 +280,72 @@ A possible extension of this work is to examine whether race moderates the brill
 
 ### Power analysis
 
-::: {.callout-tip icon=false}
-## Guidance
+The original study found a small effect of approximately d = .213 (converted from the reported log-odds coefficient, b = -0.483, 95% CI [-0.807, -0.165]) with N = 347.Using hte original proportions (40.5% vs. 52.5% female referrals), I conducted an a priori power analysis in G*Power 3.1 (Faul, et al., 2009) for an exact test of the difference between two independent proportions (α = .042, one-tailed, power = .802), which indicated a required sample of N = 458. Because of class budget constraints, I will use the original study's sample size of N = 347.
 
-Report the original effect size, the sample needed for 80%, 90% and 95% power to detect it,
-and the sample you chose and why. The table below is computed from the original study's
-numbers entered at the top of this file.
-
-Original effects are usually overestimates, so powering to the original effect tends to
-produce an underpowered replication. One widely used alternative is to collect 2.5 times the
-original sample, which gives 80% power to detect an effect the original study had only 33%
-power to detect (Simonsohn, 2015; Experimentology §10.4). Say which approach you used, and
-what the course's participant budget allowed.
-:::
-
-```{r}
-#| label: power
-power_rows <- map_dfr(c(0.80, 0.90, 0.95), function(pw) {
-  n <- power.prop.test(p1 = original_p_gain, p2 = original_p_loss,
-                       power = pw, sig.level = 0.05)$n
-  tibble(power = scales::percent(pw), n_per_group = ceiling(n), n_total = 2 * ceiling(n))
-})
-
-original_effect <- original_p_loss - original_p_gain
-two_and_half <- ceiling(2.5 * original$n)
-
-knitr::kable(power_rows, col.names = c("Power", "N per frame", "N total"),
-             caption = sprintf(
-               "Sample needed to detect the original effect (risky choice: %.0f%% gain vs %.0f%% loss, a difference of %.0f points), two-sided alpha = .05.",
-               100 * original_p_gain, 100 * original_p_loss, 100 * original_effect))
-```
-
-For comparison, 2.5 times the original sample would be `r two_and_half[1]` in the gain frame
-and `r two_and_half[2]` in the loss frame (`r sum(two_and_half)` in total).
 
 ### Planned sample
 
-::: {.callout-tip icon=false}
-## Guidance
+I plan to recruit a sample of 347 US residents who are ages 18 or older on Prolific. The study uses a survey format on Qualtrics and corresponds to Experiment 1 in the original paper. Data collection will end once N = 347 participants complete the survey. There are open data associated with the original study, but this original study was not preregistered. The sampling frame for the current replication follows the same procedures from the original experiment without any additional preselection criteria. Estimated participation time is 5 minutes, with compensation set at $0.67 per participant (equivalent to $8.00 per hour), for a total projected cost of $307.67. 
 
-Planned sample size and stopping rule, sampling frame (for example, "US residents on Prolific,
-fluent in English, 18 or older"), known demographics, and any preselection or screening. The
-stopping rule should be data-independent: "collect until N participants pass the exclusion
-criteria below" rather than "until the result is clear".
-:::
 
 ### Materials
 
-::: {.callout-tip icon=false}
-## Guidance
+## Manipulation 
 
-All materials. You can quote the original article directly: put the text in quotation marks
-and note that it was followed precisely, or quote it and point out the exceptions. Link to the
-live experiment above rather than pasting screenshots of every screen.
-:::
+"Participants were asked to imagine that they are working for “a big company” that is 'looking to fill a couple of positions in their workforce.' They were then
+randomly assigned to read one of two job descriptions. Participants in the experimental condition read a brief description that emphasized the candidates’ intellectual abilities.  In contrast, participants in the control condition read a job description that emphasized the candidates’ motivation, which is arguably a requirement for
+most jobs (e.g., 'highly motivated,' 'superior commitment,' 'consistent effort'). This description was adapted from prior work (Bian et al., 2018), where it was found to
+be gender-neutral (i.e., equally applicable to men and women)." 
+
+This manipulation was followed precisely in the replicated study. 
+
+## Memory check 
+"Immediately after reading the job description, participants’ memory of it was tested. Specifically, participants were asked to check which attributes from a list of eight had been mentioned in the job description. Of the eight characteristics, four were relevant to the 'brilliance' job and four to the control job." 
+
+Since only 2 traits were explicitly disclosed by the researchers in the original study ("high IQ" and "natural intelligence" from the experimental condition and "highly motivated" and "superior commitment" that corresponded with the control), I had to select the other 4 traits (2 from the "brilliance" condition and 2 from control) that were directly chosen from the manipulation text. 
+
+## Referral measure
+"Next, participants were asked to recommend someone they know who meets the requirements of the job, regardless of whether they already have a job. To mask the purpose of the study, we required participants to provide several pieces of information about the
+person they were referring in addition to their gender (e.g., their first name, their age, their relationship to the participant). After completing this information, participants were asked to refer a second person and were reminded of the job
+description before being allowed to do so." 
+
+This measure was followed precisely in the replicated study.
+
+## Additional measures 
+Several additional measures were included in the original experiment, including a "brilliance stereotype" measure that explored preexisting gendered stereotypes, an "interest" measure that asked participants how likely they would be apply for the job themselves, and an open-ended response asking participants to provide justification for their referrals. 
+
+These measures were excluded in the replication due to budget constraints and because they were not relevant to the main effect of interest. 
+
 
 ### Procedure
 
-::: {.callout-tip icon=false}
-## Guidance
+Participants began the study by completing a consent form and answering demographic questions (gender, age, ethnicity, country of residence, and education). The original study did not report which demographic questions were asked. Participants who did not reside in the United States or were under 18 were excluded. 
 
-As for Materials: quote the original where you can and point out the exceptions. Describe the
-sequence a participant experiences, from consent to debrief, and how long it takes.
-:::
+"Participants were asked to refer acquaintances for a job; half of the participants were told that the job was for brilliant individuals, while the other half were not. If there is gender bias in contexts where intellectual ability is salient, we should see that participants are less likely to refer women when they think the job requires brilliance." After participants were presented with the job description, they completed an attention check asking which traits were described. After completing the attention check, they were presented with the correct answers. 
+
+For each referral, participants reported the referred person's gender, age, and relationship to the participant, along with a brief explanation for the referral.
+
+Participants were then asked to report whether they answered the questions randomly and to share feedback before being presented with a debriefing form at the end. The entire study takes 5 minutes to complete. 
 
 ### Analysis plan
+All analyses will follow procedures as closely aligned with the original article as possible. 
 
-::: {.callout-tip icon=false}
-## Guidance
+## Key analysis of interest  
+Following the original study, referrals (0 = man, 1 = woman) were analyzed with a Bayesian multilevel logistic regression, with referrals nested within participants. 
 
-The analysis strategy, as close to the original as possible: data cleaning rules, exclusion
-rules, covariates, and the model or test. Original papers often do not spell this out; say
-where you had to make a choice and what you chose.
-
-**State the key analysis of interest explicitly.** That is the single test your replication
-stands or falls on, and it must match your preregistration. You can pre-specify additional
-analyses here too.
-:::
-
-**Key analysis of interest.** The proportion of participants choosing the risky program is
-higher in the loss frame than in the gain frame, tested with a chi-square test of independence
-on the 2 × 2 table of frame by choice. The effect size is the difference in the proportion
-choosing the risky program (loss minus gain), with a 95% confidence interval.
-
-**Exclusions.** Participants are excluded if they did not complete the study, if they answered
-no speeded trial at all (every lexical-decision trial timed out, the signature of a device
-without a keyboard), or if they answered fewer than 6 of the 8 lexical-decision trials
-correctly.
+## Exclusions 
+Participants were excluded from analyses if they resided outside of the United states, reported during debriefing that they had not paid attention, or did not provide any referrals or provided the same referrals every time. "Participants were also excluded if they (a) selected none of the characteristics relevant to their condition, or (b) selected one or more characteristics relevant to the other condition (e.g., 'high IQ' in the control condition). 
 
 ### Differences from the original study
 
-::: {.callout-tip icon=false}
-## Guidance
+The primary differences between the original study and the planned replication are the recruitment platform and the measures collected. THe original study recruited participants via Amazon Mechanical Turk, whereas the replication will recruit participants via Prolific. The original study included both the referral measure and a brilliance stereotype measure, whereas the replication will include only the referral measure. As a result, the replication model will include two predictors (condition and participant gender) and their interaction, instead of the original three predictors (condition, participant gender, and stereotype score) with all two- and three-way interactions. In addition, the original study's estimated marginals means were adjusted for both participant gender and stereotype score; in the replication, they will be adjusted for participant gender only. 
 
-Every known difference in sample, setting, procedure, materials, and analysis, one per row.
-Minimizing differences is the goal, but some always remain. For each one, say whether it is
-expected to matter, based on claims in the original article or later research on when the
-effect does and does not appear. The rows below are the demo's real differences and show the
-level of detail expected; replace them with yours.
-:::
 
 | Aspect | Original study | This replication | Expected to matter? |
 |---|---|---|---|
-| Sample | University students in Stanford and British Columbia classrooms | Adults recruited on Prolific | Possibly. Framing effects have been found in both student and general samples, but their size varies across populations. |
-| Setting | Paper questionnaire in class | Online, unsupervised, on the participant's own computer | Unlikely for a single vignette, though attention may be lower online. |
-| Wording | "an unusual Asian disease" | "an unusual disease" | Unlikely. The ethnonym is incidental to the manipulation and dated. |
-| Design | Between subjects: each participant saw one frame | Between subjects, randomly assigned | No. |
-| Response | Circle a program on paper | Click a button | Unlikely. |
-| Other tasks | Problems presented alongside other questionnaire items | Followed by a short lexical-decision task used as an attention check | Unlikely: the check comes after the choice. |
+| Sample |U.S. adults on Amazon Mechanical Turk| U.S. adults recruited on Prolific | No. |
+| Setting | Online, unsupervised, on the participant's own computer | Online, unsupervised, on the participant's own computer | No. |
+| Measures included | Referrals, stereotypes, interest, open-ended justifications | Referrals | Unlikely. The unstandardized coefficient may be slightly impacted without controlling for stereotype scores but not likely. |
 
 ### Methods addendum (post data collection)
 
@@ -379,11 +366,9 @@ if (!have_data) {
   cat(
     "::: {.callout-warning icon=false}\n",
     "## No Phase 1 data yet\n\n",
-    "There are no exported data for `", experiment_id, "` yet, so the sample and results ",
-    "sections are skipped. This is expected before data collection. Export with ",
-    "`npm run export -- --experiment ", experiment_id, " --key <path to your key>` and render again. ",
-    "If you have exported, check that `experiment_id` at the top of this file matches ",
-    "`EXPERIMENT.id` in `experiment.js`.\n",
+    "There are no cleaned data for `", experiment_id, "` yet, so the sample and results ",
+    "sections are skipped. This is expected before data collection. Save the Qualtrics export as ",
+    "`data/", experiment_id, "/", experiment_id, "_raw.csv` and render again.\n",
     ":::\n", sep = "")
 }
 ```
@@ -398,7 +383,6 @@ trials        <- phase1$trials
 errors        <- phase1$errors
 complete      <- phase1$complete
 keep          <- phase1$keep
-n_no_response <- phase1$n_no_response
 ```
 
 ```{r}
@@ -425,10 +409,7 @@ bind_rows(
 #| results: asis
 cat(sprintf("Of %d participants who started, %d completed the study and %d met the exclusion criteria.",
             nrow(participants), nrow(complete), nrow(keep)))
-if (n_no_response > 0) {
-  cat(sprintf(" %d completed session(s) contained no response to any speeded trial and were excluded on that basis.",
-              n_no_response))
-}
+cat(sprintf(" %d completed session(s) failed the memory check.", phase1$n_failed_memory))
 if (nrow(keep) == 0) cat(" No participants remain for analysis yet, so the results below are empty.")
 cat("\n")
 ```
@@ -436,22 +417,11 @@ cat("\n")
 ```{r}
 #| label: demographics
 #| eval: !expr have_data
-demo <- trials |>
-  filter(task == "demographics", participant_id %in% keep$participant_id) |>
-  mutate(resp = map(response, ~ fromJSON(.x))) |>
-  transmute(
-    participant_id,
-    age    = map_dbl(resp, ~ as.numeric(.x$age %||% NA)),
-    gender = map_chr(resp, ~ as.character(.x$gender %||% NA))
-  )
-
-if (nrow(demo) > 0) {
-  demo |>
-    summarise(N = n(), `Mean age` = round(mean(age, na.rm = TRUE), 1),
-              `SD age` = round(sd(age, na.rm = TRUE), 1),
-              `Age not given` = sum(is.na(age))) |>
-    knitr::kable(caption = "Age of the analysed sample.")
-}
+keep |>
+  summarise(N = n(), `Mean age` = round(mean(age, na.rm = TRUE), 1),
+            `SD age` = round(sd(age, na.rm = TRUE), 1),
+            `Age not given` = sum(is.na(age))) |>
+  knitr::kable(caption = "Age of the analysed sample.")
 ```
 
 #### Deviations from the preregistered plan
@@ -467,34 +437,44 @@ belong here even if they seem minor, together with the reason.
 
 ### Data preparation
 
-::: {.callout-tip icon=false}
-## Guidance
-
-Data preparation follows the analysis plan. Loading and exclusions are done by the shared
-analysis code under Key statistics (open "Show the analysis code"). Describe anything you did to
-the data beyond that.
-:::
 
 ### Confirmatory analysis
 
 ```{r}
 #| label: confirmatory
 #| eval: !expr have_data
-framing <- trials |>
-  filter(task == "framing", participant_id %in% keep$participant_id) |>
-  select(participant_id, condition, choice)
-risky <- risky_counts(phase1)
-tab <- table(Frame = framing$condition, Choice = framing$choice)
 
-if (all(dim(tab) == c(2, 2))) {
-  # No continuity correction, so this test and the effect-size interval below agree: the
-  # uncorrected 2 x 2 chi-square is the same test as the two-proportion comparison.
-  print(tab)
-  print(chisq.test(tab, correct = FALSE))
+# 1. One row per referral, analysed participants only, with participant gender added
+model_dat <- trials |>
+  filter(participant_id %in% keep$participant_id, !is.na(nominated_woman)) |>
+  left_join(select(keep, participant_id, gender), by = "participant_id") |>
+  mutate(female       = case_when(str_starts(gender, "Woman") ~ 1,
+                                  str_starts(gender, "Man")   ~ 0,
+                                  TRUE ~ NA_real_),
+         brilliance   = as.numeric(condition == "brilliance"),
+         brilliance_c = brilliance - mean(brilliance),      # mean-centered, as in the original
+         female_c     = female - mean(female, na.rm = TRUE))
+
+# 2. Same model as the original, without the stereotype predictor
+if (n_distinct(model_dat$brilliance) == 2 && n_distinct(na.omit(model_dat$female)) == 2) {
+  dir.create("fits", showWarnings = FALSE)
+  fit <- brm(nominated_woman ~ brilliance_c * female_c + (1 | participant_id),
+             data = model_dat, family = bernoulli(),
+             prior = set_prior("normal(0,1)", class = "b"),
+             chains = 4, iter = 5000, warmup = 2500, control = list(adapt_delta = .99),
+             seed = 251, file = "fits/phase1", file_refit = "on_change",
+             refresh = 0, silent = 2)
+  print(summary(fit), digits = 3)
+
+  # 3. Your condition effect next to the original's
+  est <- fixef(fit)["brilliance_c", ]
+  tibble(Study = c("Original", "Phase 1: replication"),
+         b = c(original_b[["est"]], est[["Estimate"]]),
+         `95% CrI low`  = c(original_b[["low"]],  est[["Q2.5"]]),
+         `95% CrI high` = c(original_b[["high"]], est[["Q97.5"]])) |>
+    knitr::kable(digits = 3, caption = "Condition effect (brilliance vs. effort) on the log-odds of referring a woman.")
 } else {
-  message("Chi-square not run: the frame-by-choice table is ", paste(dim(tab), collapse = " x "),
-          ". It needs both frames and both choices; with ", nrow(framing),
-          " participant(s) in the analysis set this is expected.")
+  message("Model not run: need both conditions and both participant genders in the analysis set.")
 }
 ```
 
@@ -513,19 +493,21 @@ informative and should be reported as such (Experimentology §3.2).
 ```{r}
 #| label: comparison
 #| eval: !expr have_data
+rep_counts <- women_counts(phase1)
 orig <- diff_ci(original)
-rep  <- diff_ci(risky)
-
-if (!is.null(rep)) {
-  bind_rows(orig |> mutate(Study = "Original"), rep |> mutate(Study = "Phase 1: replication")) |>
+repl <- diff_ci(rep_counts)
+ 
+if (!is.null(repl)) {
+  bind_rows(orig |> mutate(Study = "Original"), repl |> mutate(Study = "Phase 1: replication")) |>
     transmute(Study, N,
-              `Difference (loss − gain)` = sprintf("%.0f points", 100 * estimate),
+              `Difference (brilliance − effort)` = sprintf("%.0f points", 100 * estimate),
               `95% CI` = sprintf("[%.0f, %.0f]", 100 * ci_low, 100 * ci_high),
               p = format.pval(p, digits = 2, eps = 0.001)) |>
-    knitr::kable(caption = "Effect size: difference in the percentage choosing the risky program.")
+    knitr::kable(caption = "Raw difference in the percentage of referrals who were women (ignores clustering).")
 } else {
-  message("Replication effect size not computed yet: need at least one analysed participant in each frame.")
+  message("Replication effect size not computed yet: need analysed participants in both conditions.")
 }
+
 ```
 
 ```{r}
@@ -533,9 +515,9 @@ if (!is.null(rep)) {
 #| eval: !expr have_data
 #| echo: false
 #| results: asis
-if (!is.null(rep)) {
-  excludes_zero <- rep$ci_low > 0 | rep$ci_high < 0
-  includes_orig <- orig$estimate >= rep$ci_low & orig$estimate <= rep$ci_high
+if (!is.null(repl)) {
+  excludes_zero <- repl$ci_low > 0 | repl$ci_high < 0
+  includes_orig <- orig$estimate >= repl$ci_low & orig$estimate <= repl$ci_high
   cat(sprintf(
     "The replication's 95%% interval %s zero and %s the original estimate of %.0f points. ",
     if (excludes_zero) "excludes" else "includes",
@@ -580,10 +562,10 @@ caption. If the original reported no variability, say so rather than leaving it 
 ```{r}
 #| label: fig-comparison
 #| eval: !expr have_data
-#| fig-cap: "Percentage choosing the risky program in each frame, original study and Phase 1 replication. Error bars are 95% confidence intervals."
+#| fig-cap: "Percentage of referrals who were women in each job description condition, original study and Phase 1 replication. Error bars are 95% confidence intervals that ignore clustering within participants."
 #| fig-width: 7
 #| fig-height: 4
-comparison_plot(Original = original, `Phase 1: replication` = risky)
+comparison_plot(Original = original, `Phase 1: replication` = rep_counts)
 ```
 
 ### Exploratory analyses
@@ -594,35 +576,6 @@ comparison_plot(Original = original, `Phase 1: replication` = risky)
 Any follow-up analyses (optional). Label them clearly as exploratory: they were not planned, so
 they generate hypotheses rather than test them.
 :::
-
-```{r}
-#| label: exploratory-rt
-#| eval: !expr have_data
-ld <- trials |>
-  filter(task == "lexical_decision", participant_id %in% keep$participant_id) |>
-  mutate(correct = as.logical(correct), is_word = as.logical(is_word), rt = as.numeric(rt)) |>
-  filter(correct, !is.na(rt))
-
-if (nrow(ld) > 0) {
-  ld |>
-    group_by(`Real word` = is_word) |>
-    summarise(`Mean RT (ms)` = round(mean(rt)), `SD (ms)` = round(sd(rt)), Trials = n(), .groups = "drop") |>
-    knitr::kable(caption = "Exploratory: lexical-decision response times, correct trials only.")
-} else {
-  message("No correct lexical-decision trials with a response time yet.")
-}
-```
-
-```{r}
-#| label: data-quality
-#| eval: !expr have_data
-if (nrow(errors) > 0) {
-  errors |> select(any_of(c("at", "trial_index", "message"))) |> head(20) |>
-    knitr::kable(caption = "JavaScript errors reported from participants' browsers.")
-} else {
-  message("No errors were reported from participants' browsers.")
-}
-```
 
 ## Discussion
 
@@ -719,6 +672,7 @@ have it and the original's otherwise.
 
 ```{r}
 #| label: phase2-power
+#| eval: false
 phase2_n_per_group <- 150   # planned analysed participants per condition in Phase 2
 
 p1_counts <- if (have_data) risky_counts(phase1)
