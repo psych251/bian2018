@@ -89,9 +89,10 @@ original_b <- c(est = -0.483, low = -0.807, high = -0.165)
 I used AI to help debug errors I was getting on my Terminal when I was cloning the Github repository to my local device folders. 
 
 | Tool and model | What it was used for | How you checked the output |
-|Claude-Opus-5-5|Debugging clone code from repo|I reviewed the output and typed the code in on my own into the terminal| 
-|Claude-Sonnet-5-5|Wrote and adapted code based on syntax provided from original study|I reviewed the output and handcounts from exclusions|
-
+|---|---|---|
+| Claude-Opus-5-5 | Debugging clone code from repo | I reviewed the output and typed the code in on my own into the terminal |
+| Claude-Sonnet-5-5 | Wrote and adapted code based on syntax provided from original study | I reviewed the output and handcounts from exclusions |
+| Claude-Sonnet-5-5 | Created code to anonymize qualtrics survey responses | I reviewed the output and ensured that it ran and rendered properly |
 | *e.g., Claude Code (Claude Opus 5)* | *Implemented the experiment from the original Methods section* | *Ran the automated tests; took the study myself; compared every screen with the original materials* |
 | *e.g., Claude Code (Claude Opus 5)* | *Drafted the analysis code* | *Checked the exclusion counts by hand; confirmed the key test matches the preregistration* |
 | *e.g., ChatGPT* | *Comments on my draft of the Introduction (no text generated)* | *Decided which comments to act on and made every change myself; checked any factual claim against the source* |
@@ -149,10 +150,10 @@ read_phase <- function(id) {
       condition      = recode_cond(condition),
       gender, ethnicity, residence, education,
       age            = suppressWarnings(as.numeric(age)),
-      memory_check,
+      manipulation_check = memory_check,   # Qualtrics column name
       answered_randomly = str_detect(random, "^Yes") %in% TRUE,
       n_referrals    = (!is.na(ref_gen_1)) + (!is.na(ref_gen_2)),
-      same_referral  = str_squish(str_to_lower(ref_name_1)) == str_squish(str_to_lower(ref_name_2))
+      same_referral  = same_referral == "TRUE"   # computed in anonymize.R, which drops the names
     )
 
   # One row per referral (each person made two)
@@ -170,21 +171,21 @@ read_phase <- function(id) {
   errors   <- tibble()
   complete <- participants |> filter(completed)
 
-  # Exclusions: memory check (a) none of own-condition items, (b) any other-condition item;
+  # Exclusions: manipulation check (a) none of own-condition items, (b) any other-condition item;
   # outside the US; under 18; reported answering randomly; no referrals; same referral twice.
   checked <- complete |>
-    mutate(n_brilliance = count_items(memory_check, brilliance_items),
-           n_effort     = count_items(memory_check, effort_items),
+    mutate(n_brilliance = count_items(manipulation_check, brilliance_items),
+           n_effort     = count_items(manipulation_check, effort_items),
            n_own   = if_else(condition == "brilliance", n_brilliance, n_effort),
            n_other = if_else(condition == "brilliance", n_effort, n_brilliance),
-           passed_memory = n_own >= 1 & n_other == 0)
+           passed_manipulation_check = n_own >= 1 & n_other == 0)
   keep <- checked |>
-    filter(passed_memory, residence == "United States", age >= 18,
+    filter(passed_manipulation_check, residence == "United States", age >= 18,
            !answered_randomly, n_referrals >= 1, !(same_referral %in% TRUE))
 
   list(participants = participants, trials = trials, errors = errors,
        complete = complete, keep = keep,
-       n_failed_memory = sum(!checked$passed_memory))
+       n_failed_manipulation_check = sum(!checked$passed_manipulation_check))
 }
 
 # Women referred and total referrals per condition, analysed participants only.
@@ -269,7 +270,7 @@ I will be replicating Experiment 1 of Bian et al. (2018), entitled "Evidence of 
 
 I chose this study because I'm working on an existing research project examining how "collective brilliance," the idea that brilliance is an inherent feature of a community, affects task performance. Our work has assumed that collective brilliance framing improves task performance relative to individual brilliance framing. However, it has focused on how people respond to brilliance messages about themselves. Bian et al. show that individual brilliance framing also shapes judgments about who belongs in a role. Replicating this study will establish whether individual brilliance framing produces bias in organizational referral context, and can provide a foundation for testing whether collective brilliance framing reduces that bias. 
 
-The primary manipulation in this study is a text-based vignette describing a job opening at a company that either emphasizes intellectual ability or emphasizes motivation and effort. I will use the original descriptions from the supplementary materials. Participants will then complete a memory check and a referral measure in which they nominate acquaintances for the job and report each nominee's gender. Finally, they will complete a gender-brilliance stereotype measure and an open-ended justification of their referrals. The procedure described in the paper was clear and straightforward, so I don't foresee any significant challenges.
+The primary manipulation in this study is a text-based vignette describing a job opening at a company that either emphasizes intellectual ability or emphasizes motivation and effort. I will use the original descriptions from the supplementary materials. Participants will then complete a manipulation check and a referral measure in which they nominate acquaintances for the job and report each nominee's gender. Finally, they will complete a gender-brilliance stereotype measure and an open-ended justification of their referrals. The procedure described in the paper was clear and straightforward, so I don't foresee any significant challenges.
 
 The key statistical test I will preregister is a multilevel mixed-effects logistic regression predicting nominee gender (0 = man, 1 = woman) from condition (effort vs. brilliance). The key test is the effect of condition on the gender of the job referee. 
 
@@ -280,7 +281,7 @@ A possible extension of this work is to examine whether race moderates the brill
 
 ### Power analysis
 
-The original study found a small effect of approximately d = .213 (converted from the reported log-odds coefficient, b = -0.483, 95% CI [-0.807, -0.165]) with N = 347.Using hte original proportions (40.5% vs. 52.5% female referrals), I conducted an a priori power analysis in G*Power 3.1 (Faul, et al., 2009) for an exact test of the difference between two independent proportions (α = .042, one-tailed, power = .802), which indicated a required sample of N = 458. Because of class budget constraints, I will use the original study's sample size of N = 347.
+The original study found a small effect of approximately d = .213 (converted from the reported log-odds coefficient, b = -0.483, 95% CI [-0.807, -0.165]) with N = 347. Using the original proportions (40.5% vs. 52.5% female referrals), I conducted an a priori power analysis in G*Power 3.1 (Faul, et al., 2009) for an exact test of the difference between two independent proportions (α = .042, one-tailed, power = .802), which indicated a required sample of N = 458. Because of class budget constraints, I will use the original study's sample size of N = 347.
 
 
 ### Planned sample
@@ -299,8 +300,8 @@ be gender-neutral (i.e., equally applicable to men and women)."
 
 This manipulation was followed precisely in the replicated study. 
 
-## Memory check 
-"Immediately after reading the job description, participants’ memory of it was tested. Specifically, participants were asked to check which attributes from a list of eight had been mentioned in the job description. Of the eight characteristics, four were relevant to the 'brilliance' job and four to the control job." 
+## Manipulation check 
+"Immediately after reading the job description, participants’ manipulation of it was tested. Specifically, participants were asked to check which attributes from a list of eight had been mentioned in the job description. Of the eight characteristics, four were relevant to the 'brilliance' job and four to the control job." 
 
 Since only 2 traits were explicitly disclosed by the researchers in the original study ("high IQ" and "natural intelligence" from the experimental condition and "highly motivated" and "superior commitment" that corresponded with the control), I had to select the other 4 traits (2 from the "brilliance" condition and 2 from control) that were directly chosen from the manipulation text. 
 
@@ -338,12 +339,13 @@ Participants were excluded from analyses if they resided outside of the United s
 
 ### Differences from the original study
 
-The primary differences between the original study and the planned replication are the recruitment platform and the measures collected. THe original study recruited participants via Amazon Mechanical Turk, whereas the replication will recruit participants via Prolific. The original study included both the referral measure and a brilliance stereotype measure, whereas the replication will include only the referral measure. As a result, the replication model will include two predictors (condition and participant gender) and their interaction, instead of the original three predictors (condition, participant gender, and stereotype score) with all two- and three-way interactions. In addition, the original study's estimated marginals means were adjusted for both participant gender and stereotype score; in the replication, they will be adjusted for participant gender only. 
+The primary differences between the original study and the planned replication are the recruitment platform and the measures collected. The original study recruited participants via Amazon Mechanical Turk, whereas the replication will recruit participants via Prolific. The original study did not balance participants by gender, but the replication did. The original study included both the referral measure and a brilliance stereotype measure, whereas the replication will include only the referral measure. As a result, the replication model will include two predictors (condition and participant gender) and their interaction, instead of the original three predictors (condition, participant gender, and stereotype score) with all two- and three-way interactions. In addition, the original study's estimated marginals means were adjusted for both participant gender and stereotype score; in the replication, they will be adjusted for participant gender only. 
 
 
 | Aspect | Original study | This replication | Expected to matter? |
 |---|---|---|---|
 | Sample |U.S. adults on Amazon Mechanical Turk| U.S. adults recruited on Prolific | No. |
+| Sample |U.S. adults on Amazon Mechanical Turk| Gendered balanced U.S. adults recruited on Prolific | No. |
 | Setting | Online, unsupervised, on the participant's own computer | Online, unsupervised, on the participant's own computer | No. |
 | Measures included | Referrals, stereotypes, interest, open-ended justifications | Referrals | Unlikely. The unstandardized coefficient may be slightly impacted without controlling for stereotype scores but not likely. |
 
@@ -409,7 +411,7 @@ bind_rows(
 #| results: asis
 cat(sprintf("Of %d participants who started, %d completed the study and %d met the exclusion criteria.",
             nrow(participants), nrow(complete), nrow(keep)))
-cat(sprintf(" %d completed session(s) failed the memory check.", phase1$n_failed_memory))
+cat(sprintf(" %d completed session(s) failed the manipulation check.", phase1$n_failed_manipulation_check))
 if (nrow(keep) == 0) cat(" No participants remain for analysis yet, so the results below are empty.")
 cat("\n")
 ```

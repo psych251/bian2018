@@ -52,6 +52,10 @@ original_paper/
 # identifying before committing, exactly as you would the free-text columns.
 identifiers.csv
 
+# Raw Qualtrics export (Prolific ids, referral names, free text) and the id mapping. Run
+# writeup/anonymize.R to produce the public data/<id>/<id>_raw.csv from it.
+private/
+
 # OS / editor
 .DS_Store
 .Rhistory
