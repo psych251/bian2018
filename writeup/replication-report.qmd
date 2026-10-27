@@ -349,6 +349,9 @@ The primary differences between the original study and the planned replication a
 | Setting | Online, unsupervised, on the participant's own computer | Online, unsupervised, on the participant's own computer | No. |
 | Measures included | Referrals, stereotypes, interest, open-ended justifications | Referrals | Unlikely. The unstandardized coefficient may be slightly impacted without controlling for stereotype scores but not likely. |
 
+## Pilot B
+A pilot study was conducted on Prolific with 5 participants. The median completion time was 5 minutes. Participants received $0.67, which corresponds to $8.00 per hour. The original study did not report results with and without exclusions. I will report the key analysis both on the full sample and after applying the exclusion criteria because a high proportion of pilot participants failed the manipulation check. 
+
 ### Methods addendum (post data collection)
 
 ::: {.callout-tip icon=false}
