@@ -102,17 +102,6 @@ responsibility for the content of this report, including any errors introduced b
 
 # Key statistics
 
-::: {.callout-tip icon=false}
-## Guidance
-
-One row per study for the key comparison: the original, your Phase 1 replication, and your
-Phase 2 extension. The table fills itself in from the data as each phase is exported, using the
-analysis code below (open "Show the analysis code"), which is shared by both phases so they are
-analysed identically. Edit that code once, here, to match your design and preregistered
-exclusion rule. On the scientific-extension track, the Phase 2 row reports the new comparison:
-adapt its code and say so in the caption.
-:::
-
 ```{r}
 #| label: analysis-functions
 #| code-summary: "Show the analysis code (shared by Phase 1 and Phase 2)"
@@ -521,16 +510,6 @@ bind_rows(
 
 ### Replication assessment
 
-::: {.callout-tip icon=false}
-## Guidance
-
-Judge the replication on effect sizes, not only on whether the key test is significant. Compare
-the replication estimate and its interval with the original: does the interval exclude zero, and
-does it include the original estimate? A significant result much smaller than the original, or
-a non-significant result whose interval still includes the original effect, are both
-informative and should be reported as such (Experimentology §3.2).
-:::
-
 ```{r}
 #| label: comparison
 #| eval: !expr have_data
@@ -572,37 +551,6 @@ if (!is.null(repl)) {
 }
 ```
 
-::: {.callout-tip icon=false}
-## Guidance: show the original next to your replication
-
-**Every report should have a figure that puts the original finding and your replication side by
-side.** It is the single most informative thing in a replication report: a reader can see at a
-glance whether the effect came back, and how its size compares. Make it however you can, in
-roughly this order of preference:
-
-1. **Replot both from numbers.** Enter the original's summary statistics (means or proportions,
-   with SDs, SEs or CIs, and Ns) in the original-study chunk at the top of this file, and plot
-   them on the same axes as yours. That is what the demo figure below does.
-2. **Replot the original from its data**, if the authors shared it or it is in an open
-   repository, using exactly the same plotting code as for your own data.
-3. **Show the original figure as an image** next to yours if neither is possible. Save a
-   screenshot of it, for example as `writeup/images/original-figure.png`, and lay the two out
-   in columns:
-
-   ````markdown
-   ::: {layout-ncol=2}
-   ![Original: Tversky & Kahneman (1981), Figure 1](images/original-figure.png)
-
-   ```{{r}}
-   # your replication plot here
-   ```
-   :::
-   ````
-
-Whichever you choose, use the same measure, scale, condition order and error-bar meaning for
-both panels, label which is which, and cite the source of the original values or figure in the
-caption. If the original reported no variability, say so rather than leaving it out silently.
-:::
 
 ```{r}
 #| label: fig-comparison
@@ -616,13 +564,6 @@ comparison_plot(Original = original,
 ```
 
 ### Exploratory analyses
-
-::: {.callout-tip icon=false}
-## Guidance
-
-Any follow-up analyses (optional). Label them clearly as exploratory: they were not planned, so
-they generate hypotheses rather than test them.
-:::
 
 ## Discussion
 
@@ -658,6 +599,8 @@ There are several possible reasons why Phase 1 did not reproduce the original re
 Everything not listed above is identical to Phase 1.
 
 ## Power and sample
+A power analysis for a difference between two independent proportions  (α = .05, one-tailed, power = .802) indicated a required sample of about 640 referrals in total (321 per condition). Because each participant in Phase 2 will make four referrals, and after a small adjustment for clustering of referrals within participants (within-person correlation of about 0.005, estimated from Phase 1), this corresponds to about 164 analyzed participants (82 per condition). 
+
 
 ```{r}
 #| label: phase2-power
@@ -727,19 +670,6 @@ The confirmatory analysis for Phase 2 will be the same as Phase 1, with the key 
 
 Exploratory analyses will examine whether participant gender and race (Black vs. White) are related to who is referred, and whether the brilliance effect differs by gender or race. 
 
-::: {.callout-tip icon=false}
-## Guidance
-
-The confirmatory analysis for Phase 2, written before Phase 2 data collection. On the
-best-practices tracks this is normally the same key test as Phase 1, run on the Phase 2 data
-alone; say whether you will also report a pooled estimate across phases, and label it
-exploratory if so. On the scientific track, specify the test for the new comparison. Name the
-exclusion rule (unchanged unless it is in the Changes table) and list any exploratory measures.
-
-Run Phase 2 under a new `EXPERIMENT.id` in `experiment.js` (for example `smith2016-phase2`) and
-set `experiment_id_phase2` at the top of this file to match, so the two phases' data never mix.
-:::
-
 ## Results
 
 ```{r}
@@ -785,23 +715,7 @@ comparison_plot(Original = original,
 
 ## Discussion
 
-::: {.callout-tip icon=false}
-## Guidance
-
-Compare Phase 2 with Phase 1 and with the original, using the Key statistics table and the figure
-above. Did the precision improve as you expected? For a rescue, did addressing the plausible
-reasons recover the effect? For a scientific extension, what does the new condition show? End
-with what the two phases together say about the original finding.
-:::
-
 # Data and code availability
-
-::: {.callout-tip icon=false}
-## Guidance
-
-Edit the statement below to match what you are actually sharing. Anonymized data and all code
-should be public; if something cannot be shared, say what and why.
-:::
 
 The experiment code, the anonymized data, and the code that produces every number in this
 report are available at <https://github.com/psych251/your-repo>. The experiment itself can be
