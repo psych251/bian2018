@@ -93,9 +93,8 @@ I used AI to help debug errors I was getting on my Terminal when I was cloning t
 | Claude-Opus-5-5 | Debugging clone code from repo | I reviewed the output and typed the code in on my own into the terminal |
 | Claude-Sonnet-5-5 | Wrote and adapted code based on syntax provided from original study | I reviewed the output and handcounts from exclusions |
 | Claude-Sonnet-5-5 | Created code to anonymize qualtrics survey responses | I reviewed the output and ensured that it ran and rendered properly |
-| *e.g., Claude Code (Claude Opus 5)* | *Implemented the experiment from the original Methods section* | *Ran the automated tests; took the study myself; compared every screen with the original materials* |
-| *e.g., Claude Code (Claude Opus 5)* | *Drafted the analysis code* | *Checked the exclusion counts by hand; confirmed the key test matches the preregistration* |
-| *e.g., ChatGPT* | *Comments on my draft of the Introduction (no text generated)* | *Decided which comments to act on and made every change myself; checked any factual claim against the source* |
+| Claude-Sonnet-5-5 | Created code for power analysis based on original study and Phase 1 results | I reviewed the output and ensured that it aligned with class budgetary constraints |
+| Claude-Sonnet-5-5 | I used Claude to help me push my updated changes to Github | I reviewed the changes and made sure the updated versions were pushed |
 
 I wrote all of the text in this report myself. AI tools were not used to write, rewrite or
 paraphrase it, and were not used to generate, alter, or impute any participant data. I take full
