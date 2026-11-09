@@ -25,9 +25,24 @@ id_path  <- file.path("..", "private", "identifiers.csv")
 if (!file.exists(in_path)) stop("Put the raw Qualtrics export at ", normalizePath(file.path("..", "private"), mustWork = FALSE), "/qualtrics_export.csv")
 
 raw <- read_csv(in_path, col_types = cols(.default = "c"), show_col_types = FALSE)
+# Responses that started before this date are earlier pilot/test runs and are dropped. Must
+# happen here, before the StartDate column is removed below.
+first_start_date <- "2026-10-26"
+
 # Rows 1-2 are Qualtrics' question text and ImportId; keep them. Drop "Survey Preview" test
 # responses (anything not collected as a real response, Status == "IP Address").
-raw <- raw[seq_len(nrow(raw)) <= 2 | raw$Status == "IP Address", ]
+raw <- raw[seq_len(nrow(raw)) <= 2 |
+             (raw$Status == "IP Address" & substr(raw$StartDate, 1, 10) >= first_start_date), ]
+
+# Repeat participants: anyone whose Prolific ID appears more than once took the study twice,
+# which is not allowed under the IRB protocol. ALL of their responses (first and second) are
+# dropped. Has to happen here, before PROLIFIC_PID is removed below.
+n_before <- nrow(raw) - 2
+repeat_ids <- raw[-(1:2), ] |> count(PROLIFIC_PID) |> filter(n > 1) |> pull(PROLIFIC_PID)
+raw <- raw[c(TRUE, TRUE, !(raw$PROLIFIC_PID[-(1:2)] %in% repeat_ids)), ]
+message("Dropped ", n_before - (nrow(raw) - 2), " responses from ", length(repeat_ids),
+        " Prolific IDs that took the study more than once (both attempts removed).")
+
 is_data <- seq_len(nrow(raw)) > 2
 
 # Referral-name comparison first, while the names are still here.

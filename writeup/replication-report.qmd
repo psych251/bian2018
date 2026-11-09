@@ -80,7 +80,7 @@ original_b <- c(est = -0.483, low = -0.807, high = -0.165)
 ## Project links
 
 - **Original paper:** Bian, L., Leslie, S.-J., & Cimpian, A. (2018). Evidence of bias against girls and women in contexts that emphasize intellectual ability. *American Psychologist, 73*(9), 1139–1153. https://doi.org/10.1037/amp0000427
-- **Preregistration:** [OSF registration](https://osf.io/XXXXX) *(registered YYYY-MM-DD, before final data collection)*
+- **Preregistration:** [OSF registration] (https://osf.io/59yxn) *(registered 2026-11-02, before final data collection)*
 - **Live experiment:** <https://stanforduniversity.qualtrics.com/jfe/form/SV_b1xkilAyjiKAVPE> (take the study exactly as participants did)
 - **Repository:** <https://github.com/psych251/bian2018.git> (experiment code, data, and this report)
 :::
@@ -152,6 +152,7 @@ read_phase <- function(id) {
       age            = suppressWarnings(as.numeric(age)),
       manipulation_check = memory_check,   # Qualtrics column name
       answered_randomly = str_detect(random, "^Yes") %in% TRUE,
+      random_blank   = is.na(random),     # left the "answered randomly?" question empty
       n_referrals    = (!is.na(ref_gen_1)) + (!is.na(ref_gen_2)),
       same_referral  = same_referral == "TRUE"   # computed in anonymize.R, which drops the names
     )
@@ -172,26 +173,31 @@ read_phase <- function(id) {
   complete <- participants |> filter(completed)
 
   # Exclusions: manipulation check (a) none of own-condition items, (b) any other-condition item;
-  # outside the US; under 18; reported answering randomly; no referrals; same referral twice.
+  # not a US resident; under 18; reported answering randomly (or left that question blank);
+  # no referrals; same referral twice.
   checked <- complete |>
     mutate(n_brilliance = count_items(manipulation_check, brilliance_items),
            n_effort     = count_items(manipulation_check, effort_items),
            n_own   = if_else(condition == "brilliance", n_brilliance, n_effort),
            n_other = if_else(condition == "brilliance", n_effort, n_brilliance),
            passed_manipulation_check = n_own >= 1 & n_other == 0)
-  keep <- checked |>
-    filter(passed_manipulation_check, residence == "United States", age >= 18,
-           !answered_randomly, n_referrals >= 1, !(same_referral %in% TRUE))
+  # Two analysis samples. Both exclude people who reported answering randomly.
+  #   keep          : also requires passing the manipulation check (the original's rule)
+  #   keep_no_check : does not use the manipulation check
+  keep_no_check <- checked |>
+    filter(residence == "United States", age >= 18,
+           !answered_randomly, !random_blank, n_referrals >= 1, !(same_referral %in% TRUE))
+  keep <- keep_no_check |> filter(passed_manipulation_check)
 
   list(participants = participants, trials = trials, errors = errors,
-       complete = complete, keep = keep,
+       complete = complete, keep = keep, keep_no_check = keep_no_check,
        n_failed_manipulation_check = sum(!checked$passed_manipulation_check))
 }
 
 # Women referred and total referrals per condition, analysed participants only.
-women_counts <- function(d) {
+women_counts <- function(d, sample = "keep") {
   d$trials |>
-    filter(participant_id %in% d$keep$participant_id, !is.na(nominated_woman)) |>
+    filter(participant_id %in% d[[sample]]$participant_id, !is.na(nominated_woman)) |>
     group_by(condition) |>
     summarise(women = sum(nominated_woman), n = n(), .groups = "drop")
 }
@@ -256,7 +262,8 @@ fmt_row <- function(study, r) {
 }
 bind_rows(
   fmt_row("Original", diff_ci(original)),
-  fmt_row("Phase 1: replication", if (have_data) diff_ci(women_counts(phase1))),
+  fmt_row("Phase 1: with manipulation check", if (have_data) diff_ci(women_counts(phase1))),
+  fmt_row("Phase 1: without manipulation check", if (have_data) diff_ci(women_counts(phase1, "keep_no_check"))),
   fmt_row("Phase 2: extension", if (have_phase2) diff_ci(women_counts(phase2)))
 ) |>
   knitr::kable(align = "lrlllr",
@@ -354,11 +361,12 @@ A pilot study was conducted on Prolific with 5 participants. The median completi
 
 ### Methods addendum (post data collection)
 
-::: {.callout-tip icon=false}
-## Guidance
+As planned, 347 participants were recruited from Prolific. Participants were excluded who returned to the survey after completing it once, reported answering randomly, failed the manipulation check, referred the same person twice, were under 18, or did not live in the United States. After these exclusions, 243 participants were retained, with n = 94 in the Brilliance condition and n = 130 in the control condition. Because the manipulation check led to high attrition, an exploratory analysis was conducted with participants (N = 330) who failed the manipulation check but met all other inclusion criteria. There were 164 participants in the brilliance condition and 166 in the control condition. 
 
-Leave this section out of the version you preregister. After data collection, report the
-actual sample and any deviation from the plan above.
+
+
+::: {.callout-tip icon=false}
+
 :::
 
 #### Actual sample
@@ -387,17 +395,30 @@ participants  <- phase1$participants
 trials        <- phase1$trials
 errors        <- phase1$errors
 complete      <- phase1$complete
-keep          <- phase1$keep
+keep          <- phase1$keep            # with the manipulation check exclusion
+keep_no_check <- phase1$keep_no_check   # without it (random responders excluded in both)
+
+# Save the analysis-ready data (anonymous) next to the raw export: one row per participant and
+# one row per referral, each flagged for membership in the two analysis samples.
+clean_participants <- participants |>
+  mutate(in_sample_without_check = participant_id %in% keep_no_check$participant_id,
+         in_sample_with_check    = participant_id %in% keep$participant_id)
+write_csv(clean_participants, file.path("..", "data", experiment_id, paste0(experiment_id, "_clean_participants.csv")))
+write_csv(trials |> left_join(select(clean_participants, participant_id, gender, in_sample_without_check, in_sample_with_check),
+                              by = "participant_id"),
+          file.path("..", "data", experiment_id, paste0(experiment_id, "_clean_referrals.csv")))
 ```
 
 ```{r}
 #| label: funnel
 #| eval: !expr have_data
-funnel_levels <- c("Started", "Completed", "Passed exclusion criteria")
+funnel_levels <- c("Started", "Completed", "Passed exclusions without manipulation check",
+                   "Passed exclusions with manipulation check")
 bind_rows(
-  participants |> mutate(step = "Started"),
-  complete     |> mutate(step = "Completed"),
-  keep         |> mutate(step = "Passed exclusion criteria")
+  participants  |> mutate(step = "Started"),
+  complete      |> mutate(step = "Completed"),
+  keep_no_check |> mutate(step = "Passed exclusions without manipulation check"),
+  keep          |> mutate(step = "Passed exclusions with manipulation check")
 ) |>
   mutate(step = factor(step, levels = funnel_levels)) |>
   count(step, condition, .drop = FALSE) |>
@@ -412,8 +433,8 @@ bind_rows(
 #| eval: !expr have_data
 #| echo: false
 #| results: asis
-cat(sprintf("Of %d participants who started, %d completed the study and %d met the exclusion criteria.",
-            nrow(participants), nrow(complete), nrow(keep)))
+cat(sprintf("Of %d participants who started, %d completed the study. %d met the exclusion criteria without the manipulation check and %d met them with it.",
+            nrow(participants), nrow(complete), nrow(keep_no_check), nrow(keep)))
 cat(sprintf(" %d completed session(s) failed the manipulation check.", phase1$n_failed_manipulation_check))
 if (nrow(keep) == 0) cat(" No participants remain for analysis yet, so the results below are empty.")
 cat("\n")
@@ -422,20 +443,19 @@ cat("\n")
 ```{r}
 #| label: demographics
 #| eval: !expr have_data
-keep |>
+bind_rows(keep_no_check |> mutate(Sample = "Without manipulation check"),
+          keep          |> mutate(Sample = "With manipulation check")) |>
+  group_by(Sample) |>
   summarise(N = n(), `Mean age` = round(mean(age, na.rm = TRUE), 1),
             `SD age` = round(sd(age, na.rm = TRUE), 1),
             `Age not given` = sum(is.na(age))) |>
-  knitr::kable(caption = "Age of the analysed sample.")
+  knitr::kable(caption = "Age of the analysed samples.")
 ```
 
 #### Deviations from the preregistered plan
-
+None. 
 ::: {.callout-tip icon=false}
-## Guidance
 
-Any deviation from the preregistered plan above, or "None". Changes made after seeing data
-belong here even if they seem minor, together with the reason.
 :::
 
 ## Results
@@ -449,38 +469,55 @@ belong here even if they seem minor, together with the reason.
 #| label: confirmatory
 #| eval: !expr have_data
 
-# 1. One row per referral, analysed participants only, with participant gender added
-model_dat <- trials |>
-  filter(participant_id %in% keep$participant_id, !is.na(nominated_woman)) |>
-  left_join(select(keep, participant_id, gender), by = "participant_id") |>
-  mutate(female       = case_when(str_starts(gender, "Woman") ~ 1,
-                                  str_starts(gender, "Man")   ~ 0,
-                                  TRUE ~ NA_real_),
-         brilliance   = as.numeric(condition == "brilliance"),
-         brilliance_c = brilliance - mean(brilliance),      # mean-centered, as in the original
-         female_c     = female - mean(female, na.rm = TRUE))
+# The same model is fit twice: on the sample that also excludes failures of the manipulation
+# check, and on the sample that does not use it. Both exclude people who answered randomly.
+fit_model <- function(keep_df, label, fit_file) {
+  # 1. One row per referral, analysed participants only, with participant gender added
+  model_dat <- trials |>
+    filter(participant_id %in% keep_df$participant_id, !is.na(nominated_woman)) |>
+    left_join(select(keep_df, participant_id, gender), by = "participant_id") |>
+    mutate(female       = case_when(str_starts(gender, "Woman") ~ 1,
+                                    str_starts(gender, "Man")   ~ 0,
+                                    TRUE ~ NA_real_),
+           brilliance   = as.numeric(condition == "brilliance"),
+           brilliance_c = brilliance - mean(brilliance),      # mean-centered, as in the original
+           female_c     = female - mean(female, na.rm = TRUE))
 
-# 2. Same model as the original, without the stereotype predictor
-if (n_distinct(model_dat$brilliance) == 2 && n_distinct(na.omit(model_dat$female)) == 2) {
+  # 2. Same model as the original, without the stereotype predictor
+  if (n_distinct(model_dat$brilliance) < 2 || n_distinct(na.omit(model_dat$female)) < 2) {
+    message(label, ": model not run: need both conditions and both participant genders.")
+    return(NULL)
+  }
   dir.create("fits", showWarnings = FALSE)
-  fit <- brm(nominated_woman ~ brilliance_c * female_c + (1 | participant_id),
-             data = model_dat, family = bernoulli(),
-             prior = set_prior("normal(0,1)", class = "b"),
-             chains = 4, iter = 5000, warmup = 2500, control = list(adapt_delta = .99),
-             seed = 251, file = "fits/phase1", file_refit = "on_change",
-             refresh = 0, silent = 2)
-  print(summary(fit), digits = 3)
-
-  # 3. Your condition effect next to the original's
-  est <- fixef(fit)["brilliance_c", ]
-  tibble(Study = c("Original", "Phase 1: replication"),
-         b = c(original_b[["est"]], est[["Estimate"]]),
-         `95% CrI low`  = c(original_b[["low"]],  est[["Q2.5"]]),
-         `95% CrI high` = c(original_b[["high"]], est[["Q97.5"]])) |>
-    knitr::kable(digits = 3, caption = "Condition effect (brilliance vs. effort) on the log-odds of referring a woman.")
-} else {
-  message("Model not run: need both conditions and both participant genders in the analysis set.")
+  brm(nominated_woman ~ brilliance_c * female_c + (1 | participant_id),
+      data = model_dat, family = bernoulli(),
+      prior = set_prior("normal(0,1)", class = "b"),
+      chains = 4, iter = 5000, warmup = 2500, control = list(adapt_delta = .99),
+      seed = 251, file = fit_file, file_refit = "on_change",
+      refresh = 0, silent = 2)
 }
+
+fit_with    <- fit_model(keep,          "With manipulation check",    "fits/phase1")
+fit_without <- fit_model(keep_no_check, "Without manipulation check", "fits/phase1_no_check")
+
+for (nm in c("With manipulation check", "Without manipulation check")) {
+  f <- if (nm == "With manipulation check") fit_with else fit_without
+  if (!is.null(f)) { cat("\n==== ", nm, " ====\n"); print(summary(f), digits = 3) }
+}
+
+# 3. Condition effect next to the original's
+est_row <- function(f, study) {
+  if (is.null(f)) return(NULL)
+  est <- fixef(f)["brilliance_c", ]
+  tibble(Study = study, b = est[["Estimate"]], `95% CrI low` = est[["Q2.5"]], `95% CrI high` = est[["Q97.5"]])
+}
+bind_rows(
+  tibble(Study = "Original", b = original_b[["est"]],
+         `95% CrI low` = original_b[["low"]], `95% CrI high` = original_b[["high"]]),
+  est_row(fit_with,    "Phase 1: with manipulation check"),
+  est_row(fit_without, "Phase 1: without manipulation check")
+) |>
+  knitr::kable(digits = 3, caption = "Condition effect (brilliance vs. effort) on the log-odds of referring a woman.")
 ```
 
 ### Replication assessment
@@ -498,12 +535,16 @@ informative and should be reported as such (Experimentology §3.2).
 ```{r}
 #| label: comparison
 #| eval: !expr have_data
-rep_counts <- women_counts(phase1)
+rep_counts          <- women_counts(phase1)                   # with manipulation check
+rep_counts_no_check <- women_counts(phase1, "keep_no_check")  # without it
 orig <- diff_ci(original)
 repl <- diff_ci(rep_counts)
- 
+repl_no_check <- diff_ci(rep_counts_no_check)
+
 if (!is.null(repl)) {
-  bind_rows(orig |> mutate(Study = "Original"), repl |> mutate(Study = "Phase 1: replication")) |>
+  bind_rows(orig |> mutate(Study = "Original"),
+            repl |> mutate(Study = "Phase 1: with manipulation check"),
+            repl_no_check |> mutate(Study = "Phase 1: without manipulation check")) |>
     transmute(Study, N,
               `Difference (brilliance − effort)` = sprintf("%.0f points", 100 * estimate),
               `95% CI` = sprintf("[%.0f, %.0f]", 100 * ci_low, 100 * ci_high),
@@ -570,7 +611,9 @@ caption. If the original reported no variability, say so rather than leaving it 
 #| fig-cap: "Percentage of referrals who were women in each job description condition, original study and Phase 1 replication. Error bars are 95% confidence intervals that ignore clustering within participants."
 #| fig-width: 7
 #| fig-height: 4
-comparison_plot(Original = original, `Phase 1: replication` = rep_counts)
+comparison_plot(Original = original,
+                `Phase 1: with manipulation check` = rep_counts,
+                `Phase 1: without manipulation check` = rep_counts_no_check)
 ```
 
 ### Exploratory analyses
@@ -584,140 +627,106 @@ they generate hypotheses rather than test them.
 
 ## Discussion
 
+
 ### Summary of replication attempt
 
-::: {.callout-tip icon=false}
-## Guidance
+Bian et al. (2018) Study 1 showed that women were referred less often in the brilliance condition than the control condition (b = -0.48, 95% CrI [-0.81, -0.17]). The replication partially replicated these findings. Women were referred less often under the brilliance condition in the same direction as the original, but the effect was about half the size (b = -0.20, 95% CrI [-0.60, 0.20]) with the manipulation check and b = -0.24, 95% CrI [-0.57, 0.08] without it. Since the replication intervals include zero and also the original estimate, the data are therefore consistent with a smaller effect or with no effect, and do not distinguish between them. 
 
-Open with one paragraph summarizing the result of the key analysis and your assessment of
-whether the original finding replicated, partially replicated, or failed to replicate. Base
-that judgment on the replication assessment above: the size of the effect relative to the
-original, not just the p value.
-:::
 
 ### Commentary
+Exploratory analyses showed that the brilliance effect did not differ by participant gender. There was, however, a main effect of gender, such that women were more likely to refer other women more often than men did, regardless of condition (b = 1.14, 95% CrI [0.75, 1.53] among participants who passed the manipulation check). Although we followed the original experimental paradigm closely, we observed a smaller effect in the same direction rather than the same effect. The sample also differed from the original. In the replication, participants were recruited on Prolific rather than Mechanical Turk and were gender balanced. There were no other differences between the studies that are likely to have influenced the results. The original authors were contacted about the high attrition from the manipulation check, but no response was received. 
 
-::: {.callout-tip icon=false}
-## Guidance
-
-Open-ended commentary, none of it long: (a) what the exploratory analyses suggest; (b) what the
-replication means, for example whether the differences between your study and the original are
-definitely, plausibly, or unlikely to be moderators of the result; and (c) any objections or
-challenges raised by you or the original authors.
 :::
 
 # Phase 2: Extension
 
-::: {.callout-tip icon=false}
-## Guidance: choosing your extension
-
-Follow the Extension guidelines page on Canvas. In brief:
-
-- **By default the extension is a best-practices modification of your Phase 1 experiment.** If
-  your replication did not succeed, it is a **rescue**: address the plausible reasons for the
-  failure. If it did succeed, it is an **upgrade**: make the estimate more precise. Typical
-  changes are better or more reliable measurement, more trials, a within-participant design
-  where that is legitimate, comprehension and manipulation checks, clearer instructions, or a
-  larger or better-targeted sample.
-- **If your scientific extension pitch was approved at Milestone 3 and your replication
-  succeeded, propose that instead:** the original conditions rerun unchanged, plus the one
-  added condition or manipulation, with a power analysis for the new comparison.
-- On either track you may add exploratory measures **at the end** of the study.
-- Every change is listed and tagged by category below; everything else stays identical.
-
-State your track on the line below, and delete the others.
-:::
-
-**Track:** Best-practices upgrade / Best-practices rescue / Scientific extension (approved at Milestone 3)
+**Track:** Best-practices rescue 
 
 ## Rationale
+There are several possible reasons why Phase 1 did not reproduce the original result. First, the study was a single vignette study, which is often harder to replicate. Effects from a single study are often overestimated and tend to shrink on replication. Also, In the original study, additional participants were recruited so that 347 remained after exclusions fro the manipulation check. Because of budget constraints, we could not do this, so we recruited a fixed sample and applied exclusions afterward, leaving fewer analyzed participants (330 without the check and 224 with it) and wider intervals. Fourth, the original sample was collected using Amazon Mechanical Turk in 2018, whereas we used a gender-balanced Prolific sample in 2026. Participants today may be more aware of implicit stereotypes and more sensitive to small differences in wording, which could change how they respond. Because the estimate trended in the same direction but was smaller and less certain, we interpret the result as a partial replication rather than a failure. 
 
-::: {.callout-tip icon=false}
-## Guidance
-
-One or two paragraphs. For a rescue: what are the plausible reasons Phase 1 did not reproduce the
-original result, and how does each change address one of them? For an upgrade: where is the
-Phase 1 estimate least precise or least trustworthy, and how will the changes improve it? For a
-scientific extension: what question does the added condition answer, and why does it follow from
-the original finding?
-:::
 
 ## Changes from Phase 1
 
 ::: {.callout-tip icon=false}
-## Guidance
-
-Every change from the Phase 1 experiment, one per row, each tagged with a category: Measurement,
-Trials, Design, Checks, Instructions, Sample, Added condition (scientific track only), or
-Exploratory measure (end of study only). If it is not in this table, it does not change: same
-materials, wording, procedure, exclusion rule and analysis. The rows below are examples for the
-demo; replace them with yours.
-:::
 
 | # | Category | Phase 1 | Phase 2 | Why |
 |---|---|---|---|---|
-| 1 | Sample | 27 analysed participants | 300 analysed participants (150 per frame) | Phase 1's interval was too wide to distinguish the original effect from a much smaller one. |
-| 2 | Checks | No comprehension check | After the choice, participants say how many people are at risk (600) | Confirms participants read the scenario; failures are reported, and excluded only if preregistered. |
-| 3 | Exploratory measure | None | At the end: "How confident are you in your choice?" (1–7) | Exploratory only; collected after every confirmatory measure. |
+| 1 | Sample | U.S. adults on Prolific of any ethnicity; 330 analyzed participants (about 67% White, 22% Black | U.S. adults on Prolific who identify as Black or White; 164 analyzed participants (82 per condition) | Allows exploratory tests of whether the race of the participant related to who is referred, and whether the brilliance effect differs by race. |
+| 2 | Instructions | The job description was shown on one screen | The description is shown one or two sentences at a time, and participants step through with a 5-secodn timer on each part | In Phase 1, 122 of 366 participants failed the manipulation check, mostly by ticking an item from teh wrong condition. Requiring participatns to read the whole description should raise the pass rate. |
+| 3 | Trials | 2 referrals per participant | 4 referrals per participant | More referrals per person give more data from each participant, which reduces the number of participants needed for the same power. |
 
 Everything not listed above is identical to Phase 1.
 
 ## Power and sample
 
-::: {.callout-tip icon=false}
-## Guidance
-
-Justify the Phase 2 sample, and **state how you expect the estimate and its precision to compare
-with Phase 1**. For an upgrade, plan the sample around the confidence interval you want; for a
-rescue, around the power to detect the original effect, or the smallest effect you would still
-consider a successful replication; for a scientific extension, around the power to detect the new
-comparison. Set `phase2_n_per_group` in the code below; the table uses Phase 1's estimate if you
-have it and the original's otherwise.
-:::
-
 ```{r}
 #| label: phase2-power
-#| eval: false
-phase2_n_per_group <- 150   # planned analysed participants per condition in Phase 2
+# Phase 2 sample plan: power to detect the ORIGINAL effect, with several referrals per person.
+phase2_n_per_group   <- 82     # planned analysed participants per condition in Phase 2
+referrals_per_person <- 4      # Phase 2 asks for more referrals than Phase 1's two
+power_target         <- 0.80
 
-p1_counts <- if (have_data) risky_counts(phase1)
-p1_stats  <- if (have_data) diff_ci(p1_counts)
-basis <- if (!is.null(p1_stats)) {
-  list(gain = p1_counts$risky[p1_counts$condition == "gain"] / p1_counts$n[p1_counts$condition == "gain"],
-       loss = p1_counts$risky[p1_counts$condition == "loss"] / p1_counts$n[p1_counts$condition == "loss"],
-       source = "Phase 1")
-} else {
-  list(gain = original_p_gain, loss = original_p_loss, source = "the original study")
-}
+# Within-person correlation of referrals: from the Phase 1 model if it was fit, else a default.
+icc <- if (exists("fit_without") && !is.null(fit_without)) {
+  sdp <- posterior_summary(fit_without, variable = "sd_participant_id__Intercept")[1, "Estimate"]
+  sdp^2 / (sdp^2 + pi^2 / 3)
+} else 0.01
+design_effect <- 1 + (referrals_per_person - 1) * icc
 
-# Expected 95% CI half-width on the difference at n per condition.
-half_width <- function(n) 1.96 * sqrt(basis$gain * (1 - basis$gain) / n + basis$loss * (1 - basis$loss) / n)
-power_at <- function(n, p1, p2) {
-  tryCatch(power.prop.test(n = n, p1 = p1, p2 = p2, sig.level = 0.05)$power, error = function(e) NA)
-}
-
-rows <- tibble(
-  Study = c(if (!is.null(p1_stats)) "Phase 1 (actual)", "Phase 2 (planned)"),
-  `N analysed` = c(if (!is.null(p1_stats)) p1_stats$N, 2 * phase2_n_per_group),
-  `95% CI half-width` = c(if (!is.null(p1_stats)) sprintf("±%.0f points", 100 * (p1_stats$ci_high - p1_stats$ci_low) / 2),
-                          sprintf("±%.0f points (expected)", 100 * half_width(phase2_n_per_group)))
-)
-knitr::kable(rows, caption = sprintf("Precision of the key estimate, Phase 2 expected values based on %s.", basis$source))
-
+# A. Sample needed for the target power. The test counts referrals, so convert to people.
+n_refs_per_group <- ceiling(power.prop.test(p1 = original_p_effort, p2 = original_p_brilliance,
+                                            power = power_target, sig.level = 0.05)$n)
+n_people_per_group <- ceiling(n_refs_per_group * design_effect / referrals_per_person)
 tibble(
-  `Effect to detect` = c(sprintf("Original: %.0f points", 100 * (original_p_loss - original_p_gain)),
-                         if (!is.null(p1_stats)) sprintf("Phase 1: %.0f points", 100 * p1_stats$estimate),
-                         sprintf("Half the original: %.0f points", 50 * (original_p_loss - original_p_gain))),
-  `Power at planned N` = scales::percent(c(
-    power_at(phase2_n_per_group, original_p_gain, original_p_loss),
-    if (!is.null(p1_stats)) power_at(phase2_n_per_group, basis$gain, basis$loss),
-    power_at(phase2_n_per_group, original_p_gain, original_p_gain + (original_p_loss - original_p_gain) / 2)
-  ), accuracy = 1)
+  Quantity = c("Referrals per condition", "Referrals in total",
+               sprintf("Participants per condition (%d referrals each)", referrals_per_person),
+               "Participants in total"),
+  Value = c(n_refs_per_group, 2 * n_refs_per_group, n_people_per_group, 2 * n_people_per_group)
 ) |>
-  knitr::kable(caption = sprintf("Power of the Phase 2 key test at %d per condition, two-sided alpha = .05.", phase2_n_per_group))
+  knitr::kable(caption = sprintf(
+    "Sample for %.0f%% power to detect the original effect (%.1f%% vs %.1f%% women referred), two-sided alpha = .05, within-person correlation = %.3f.",
+    100 * power_target, 100 * original_p_effort, 100 * original_p_brilliance, icc))
+
+# B. Power at the planned sample, for three possible true effects.
+power_people <- function(p1, p2, k, n_per_group) {
+  power.prop.test(n = n_per_group * k / (1 + (k - 1) * icc), p1 = p1, p2 = p2, sig.level = 0.05)$power
+}
+p1_observed <- if (have_data) {
+  rc <- women_counts(phase1, "keep_no_check")
+  c(rc$women[rc$condition == "effort"] / rc$n[rc$condition == "effort"],
+    rc$women[rc$condition == "brilliance"] / rc$n[rc$condition == "brilliance"])
+}
+effects <- tibble(
+  `Effect to detect` = c(sprintf("Original: %.0f points", 100 * (original_p_effort - original_p_brilliance)),
+                         "Half the original",
+                         if (!is.null(p1_observed)) sprintf("Phase 1 (without check): %.0f points", 100 * (p1_observed[1] - p1_observed[2]))),
+  p1 = c(original_p_effort, original_p_effort, p1_observed[1]),
+  p2 = c(original_p_brilliance, original_p_effort - (original_p_effort - original_p_brilliance) / 2, p1_observed[2])
+)
+effects |>
+  mutate(`Power, planned referrals per person` = scales::percent(pmap_dbl(list(p1, p2), ~ power_people(..1, ..2, referrals_per_person, phase2_n_per_group)), accuracy = 1),
+         `Power, 2 referrals per person`       = scales::percent(pmap_dbl(list(p1, p2), ~ power_people(..1, ..2, 2, phase2_n_per_group)), accuracy = 1)) |>
+  select(-p1, -p2) |>
+  knitr::kable(caption = sprintf("Power at %d analysed participants per condition, two-sided alpha = .05.", phase2_n_per_group))
+
+# C. Expected precision of the brilliance effect (log-odds half-width), scaled from Phase 1.
+if (exists("fit_without") && !is.null(fit_without)) {
+  b1 <- fixef(fit_without)["brilliance_c", ]
+  hw1 <- (b1[["Q97.5"]] - b1[["Q2.5"]]) / 2
+  refs1 <- nobs(fit_without)
+  refs2 <- 2 * phase2_n_per_group * referrals_per_person
+  tibble(Study = c("Phase 1 (without manipulation check)", "Phase 2 (planned, expected)"),
+         `Referrals analysed` = c(refs1, refs2),
+         `95% CrI half-width (log-odds)` = round(c(hw1, hw1 * sqrt(refs1 / refs2)), 2)) |>
+    knitr::kable(caption = "Precision of the key estimate: Phase 2 is scaled from Phase 1 by the number of referrals.")
+}
 ```
 
 ## Analysis plan
+The confirmatory analysis for Phase 2 will be the same as Phase 1, with the key analysis of interest being the referrals that were analyzed with Bayesian multilevel regression analyses. The exclusion rule is unchanged from Phase 1. Participants are excluded if they do not reside in the United States, are under 18, report answering randomly, give no referrals or the same referral more than once, take the study more than once, or fail the manipulation check. The same model without the manipulation check exclusion will be reported as a secondary analysis. A pooled estimate across Phase 1 and Phase 2 will be reported as exploratory. 
+
+Exploratory analyses will examine whether participant gender and race (Black vs. White) are related to who is referred, and whether the brilliance effect differs by gender or race. 
 
 ::: {.callout-tip icon=false}
 ## Guidance
