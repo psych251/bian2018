@@ -599,7 +599,7 @@ There are several possible reasons why Phase 1 did not reproduce the original re
 Everything not listed above is identical to Phase 1.
 
 ## Power and sample
-A power analysis for a difference between two independent proportions  (α = .05, one-tailed, power = .802) indicated a required sample of about 640 referrals in total (321 per condition). Because each participant in Phase 2 will make four referrals, and after a small adjustment for clustering of referrals within participants (within-person correlation of about 0.005, estimated from Phase 1), this corresponds to about 164 analyzed participants (82 per condition). 
+A power analysis for a difference between two independent proportions  (α = .05, two-tailed, power = .802) indicated a required sample of about 640 referrals in total (321 per condition). Because each participant in Phase 2 will make four referrals, and after a small adjustment for clustering of referrals within participants (within-person correlation of about 0.005, estimated from Phase 1), this corresponds to about 164 analyzed participants (82 per condition). 
 
 
 ```{r}
